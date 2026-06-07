@@ -51,7 +51,7 @@ try {
 }
 
 // Authorized Admins for Role-Based Access
-const ADMIN_IDS = ["@xylanxd", "@abhinandan11_sharma", "@Jk_laer", "@gojo_sen_sei","@IamSumit45","@Ak47ocean","@shantanupandya"];
+const ADMIN_IDS = ["@xylanxd", "@abhinandan11_sharma", "@Jk_laer", "@gojo_sen_sei", "@IamSumit45", "@Ak47ocean", "@shantanupandya"];
 
 export default function UnifiedWorkspace() {
   const [user, setUser] = useState(null);
@@ -86,12 +86,11 @@ export default function UnifiedWorkspace() {
       return;
     }
 
-    const initAuth = async () => {
+    let unsubscribeSnapshot = null;
+
+    const setupAuthAndData = async () => {
       try {
-        if (
-          typeof __initial_auth_token !== "undefined" &&
-          __initial_auth_token
-        ) {
+        if (typeof __initial_auth_token !== "undefined" && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
           await signInAnonymously(auth);
@@ -100,82 +99,15 @@ export default function UnifiedWorkspace() {
         console.error("Auth error:", err);
       }
     };
-    initAuth();
-    const seedInitialData = async () => {
-      const defaultData = {
-        tasks: [
-          {
-            id: 1,
-            title: "Task O12 Handover",
-            status: "In Progress",
-            team: "01_Team",
-            assignee: "@shantanu",
-          },
-          {
-            id: 2,
-            title: "Task S02 Scripts",
-            status: "Done",
-            team: "03_Team",
-            assignee: "@priya",
-          },
-        ],
-        leads: [
-          {
-            id: 1,
-            name: "Prana Studios",
-            stage: "Negotiating",
-            product: "Kavach Shield OM",
-            value: 800,
-          },
-          {
-            id: 2,
-            name: "Wellness Inc",
-            stage: "New",
-            product: "Vastu Pyramids",
-            value: 2200,
-          },
-        ],
-        content: [
-          {
-            id: 1,
-            title: "Shungite SEO Post",
-            platform: "LinkedIn",
-            date: "2026-06-10",
-            status: "Scheduled",
-          },
-          {
-            id: 2,
-            title: "B2B Promo Video",
-            platform: "Instagram",
-            date: "2026-06-12",
-            status: "Drafting",
-          },
-        ],
-        gbpStats: [
-          { team: "01_Team", tasks: 15, gbp: 1250 },
-          { team: "02_Team", tasks: 8, gbp: 800 },
-        ],
-      };
-      try {
-        await setDoc(
-          doc(db, "artifacts", appId, "public", "unified_workspace"),
-          defaultData,
-        );
-      } catch (e) {
-        console.error(e);
-      }
-    };
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+    setupAuthAndData();
+
+    const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        const dataRef = doc(
-          db,
-          "artifacts",
-          appId,
-          "public",
-          "unified_workspace",
-        );
-        onSnapshot(dataRef, (snap) => {
+        // FIXED DATABASE PATH: Safely follows the strictly required /public/data/ format
+        const dataRef = doc(db, "artifacts", appId, "public", "data", "unified_workspace", "main");
+        
+        unsubscribeSnapshot = onSnapshot(dataRef, (snap) => {
           if (snap.exists()) {
             const data = snap.data();
             setTasks(data.tasks || []);
@@ -183,13 +115,39 @@ export default function UnifiedWorkspace() {
             setContent(data.content || []);
             setGbpStats(data.gbpStats || []);
           } else {
-            seedInitialData();
+            // Seed initial data if the database is completely empty
+            const defaultData = {
+              tasks: [
+                { id: 1, title: "Task O12 Handover", status: "In Progress", team: "01_Team", assignee: "@shantanu" },
+                { id: 2, title: "Task S02 Scripts", status: "Done", team: "03_Team", assignee: "@priya" },
+              ],
+              leads: [
+                { id: 1, name: "Prana Studios", stage: "Negotiating", product: "Kavach Shield OM", value: 800 },
+                { id: 2, name: "Wellness Inc", stage: "New", product: "Vastu Pyramids", value: 2200 },
+              ],
+              content: [
+                { id: 1, title: "Shungite SEO Post", platform: "LinkedIn", date: "2026-06-10", status: "Scheduled" },
+                { id: 2, title: "B2B Promo Video", platform: "Instagram", date: "2026-06-12", status: "Drafting" },
+              ],
+              gbpStats: [
+                { team: "01_Team", tasks: 15, gbp: 1250 },
+                { team: "02_Team", tasks: 8, gbp: 800 },
+              ],
+            };
+            setDoc(dataRef, defaultData).catch(err => console.error("Error seeding DB:", err));
           }
+          setIsLoaded(true);
+        }, (err) => {
+          console.error("Snapshot error (Check DB Paths):", err);
           setIsLoaded(true);
         });
       }
     });
-    return () => unsubscribeAuth();
+
+    return () => {
+      authUnsubscribe();
+      if (unsubscribeSnapshot) unsubscribeSnapshot();
+    };
   }, []);
 
   const handleLogin = (e) => {
@@ -216,10 +174,16 @@ export default function UnifiedWorkspace() {
       showToast("Permission Denied: Admins Only");
       return;
     }
+    if (!user) {
+      showToast("Cloud connection error. Refresh page.");
+      return;
+    }
 
     try {
+      // FIXED DATABASE PATH
+      const dataRef = doc(db, "artifacts", appId, "public", "data", "unified_workspace", "main");
       await setDoc(
-        doc(db, "artifacts", appId, "public", "unified_workspace"),
+        dataRef,
         {
           tasks,
           leads,
@@ -232,6 +196,7 @@ export default function UnifiedWorkspace() {
       );
       showToast("Saved to Cloud.");
     } catch (e) {
+      console.error(e);
       showToast("Error saving data.");
     }
   };
@@ -239,21 +204,15 @@ export default function UnifiedWorkspace() {
   // --- Collaborative Update Handlers ---
   const handleUpdateStatus = (type, id, field, newValue) => {
     if (type === "tasks") {
-      const updated = tasks.map((t) =>
-        t.id === id ? { ...t, [field]: newValue } : t,
-      );
+      const updated = tasks.map((t) => t.id === id ? { ...t, [field]: newValue } : t);
       setTasks(updated);
       saveData("tasks", updated);
     } else if (type === "leads") {
-      const updated = leads.map((l) =>
-        l.id === id ? { ...l, [field]: newValue } : l,
-      );
+      const updated = leads.map((l) => l.id === id ? { ...l, [field]: newValue } : l);
       setLeads(updated);
       saveData("leads", updated);
     } else if (type === "content") {
-      const updated = content.map((c) =>
-        c.id === id ? { ...c, [field]: newValue } : c,
-      );
+      const updated = content.map((c) => c.id === id ? { ...c, [field]: newValue } : c);
       setContent(updated);
       saveData("content", updated);
     }
@@ -470,12 +429,7 @@ export default function UnifiedWorkspace() {
                     <select
                       value={task.status}
                       onChange={(e) =>
-                        handleUpdateStatus(
-                          "tasks",
-                          task.id,
-                          "status",
-                          e.target.value,
-                        )
+                        handleUpdateStatus("tasks", task.id, "status", e.target.value)
                       }
                       className="w-full text-xs bg-slate-50 border border-slate-200 text-slate-700 font-bold px-2 py-2 rounded-lg outline-none cursor-pointer hover:bg-slate-100"
                     >
@@ -548,12 +502,7 @@ export default function UnifiedWorkspace() {
                     <select
                       value={lead.stage}
                       onChange={(e) =>
-                        handleUpdateStatus(
-                          "leads",
-                          lead.id,
-                          "stage",
-                          e.target.value,
-                        )
+                        handleUpdateStatus("leads", lead.id, "stage", e.target.value)
                       }
                       className="w-full text-xs bg-slate-50 border border-slate-200 text-slate-700 font-bold px-2 py-2 rounded-lg outline-none cursor-pointer hover:bg-slate-100"
                     >
@@ -622,12 +571,7 @@ export default function UnifiedWorkspace() {
                   <select
                     value={c.status}
                     onChange={(e) =>
-                      handleUpdateStatus(
-                        "content",
-                        c.id,
-                        "status",
-                        e.target.value,
-                      )
+                      handleUpdateStatus("content", c.id, "status", e.target.value)
                     }
                     className={`text-xs px-2.5 py-1.5 rounded-lg font-bold outline-none cursor-pointer border ${c.status === "Scheduled" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}
                   >
