@@ -1,20 +1,19 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { initializeApp, getApps, getApp } from "firebase/app";
 import {
-  getFirestore,
   doc,
   setDoc,
   onSnapshot,
   serverTimestamp,
 } from "firebase/firestore";
+
 import {
-  getAuth,
-  signInAnonymously,
   onAuthStateChanged,
-  signInWithCustomToken,
+  signInAnonymously,
 } from "firebase/auth";
+
+import { db, auth } from "@/lib/firebase";
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -35,21 +34,7 @@ import {
 } from "lucide-react";
 
 // --- Firebase Initialization ---
-let app, auth, db, appId;
-try {
-  const configStr =
-    typeof __firebase_config !== "undefined" ? __firebase_config : null;
-  const firebaseConfig = configStr ? JSON.parse(configStr) : null;
-  if (firebaseConfig && firebaseConfig.apiKey) {
-    app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-    auth = getAuth(app);
-    db = getFirestore(app);
-  }
-  appId = typeof __app_id !== "undefined" ? __app_id : "gobrics-default-app";
-} catch (e) {
-  console.error("Firebase init error", e);
-}
-
+const appId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 // Authorized Admins for Role-Based Access
 const ADMIN_IDS = ["@xylanxd", "@abhinandan11_sharma", "@Jk_laer", "@gojo_sen_sei", "@IamSumit45", "@Ak47ocean", "@shantanupandya"];
 
@@ -90,11 +75,7 @@ export default function UnifiedWorkspace() {
 
     const setupAuthAndData = async () => {
       try {
-        if (typeof __initial_auth_token !== "undefined" && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (err) {
         console.error("Auth error:", err);
       }
@@ -105,7 +86,7 @@ export default function UnifiedWorkspace() {
       setUser(currentUser);
       if (currentUser) {
         // FIXED DATABASE PATH: Safely follows the strictly required /public/data/ format
-        const dataRef = doc(db, "artifacts", appId, "public", "data", "unified_workspace", "main");
+        const dataRef = doc(db,"unified_workspace","main");
         
         unsubscribeSnapshot = onSnapshot(dataRef, (snap) => {
           if (snap.exists()) {
@@ -181,7 +162,7 @@ export default function UnifiedWorkspace() {
 
     try {
       // FIXED DATABASE PATH
-      const dataRef = doc(db, "artifacts", appId, "public", "data", "unified_workspace", "main");
+      const dataRef = doc(db,"unified_workspace","main");
       await setDoc(
         dataRef,
         {
